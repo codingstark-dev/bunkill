@@ -12,8 +12,8 @@ const LOGO = `
 \x1b[35m        🚀 Created by codingstark.com\x1b[0m
 `;
 
-const CURRENT_VERSION = "1.0.0";
-const PACKAGE_NAME = "npkill";
+const CURRENT_VERSION = "1.0.1";
+const PACKAGE_NAME = "bunkill";
 
 const colors = {
   reset: "\x1b[0m",

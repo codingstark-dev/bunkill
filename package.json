@@ -3,7 +3,7 @@
   "module": "index.ts",
   "main": "index.ts",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bun.js-powered node_modules cleanup tool - faster than npkill",
   "bin": {
     "bunkill": "./index.ts"
