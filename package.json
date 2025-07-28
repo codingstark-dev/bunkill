@@ -1,18 +1,44 @@
 {
   "name": "bunkill",
   "module": "index.ts",
+  "main": "index.ts",
   "type": "module",
-  "private": true,
+  "version": "1.0.0",
+  "description": "Bun.js-powered node_modules cleanup tool - faster than npkill",
+  "bin": {
+    "bunkill": "./index.ts"
+  },
+  "engines": {
+    "bun": ">=1.2.19"
+  },
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codingstark-dev/bunkill.git"
+  },
+  "homepage": "https://github.com/codingstark-dev/bunkill#readme",
+  "bugs": {
+    "url": "https://github.com/codingstark-dev/bunkill/issues"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "peerDependencies": {
-    "typescript": "^5"
+  "scripts": {
+    "test": "bun run index.ts --help"
   },
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@types/inquirer": "^9.0.8",
     "chalk": "^5.4.1",
     "commander": "^14.0.0",
+    "filesize": "^10.1.6",
     "inquirer": "^12.8.2"
-  }
+  },
+  "keywords": ["bun", "node_modules", "cleanup", "disk-space", "cli"],
+  "author": "Himanshu Mourya",
+  "license": "MIT"
 }
