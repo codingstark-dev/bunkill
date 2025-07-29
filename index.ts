@@ -12,7 +12,7 @@ const LOGO = `
 \x1b[35m        🚀 Created by codingstark.com\x1b[0m
 `;
 
-const CURRENT_VERSION = "1.0.1";
+const CURRENT_VERSION = "1.0.2";
 const PACKAGE_NAME = "bunkill";
 
 const colors = {
@@ -57,6 +57,7 @@ class BunKill {
   private sortBy: "size" | "lastModified" | "path" = "size";
   private latestVersion: string | null = null;
   private hasUpdate = false;
+  private lastSearchTime = 0;
 
   async scan(options: ScanOptions): Promise<NodeModule[]> {
     await this.checkDailyUpdate();
@@ -212,10 +213,11 @@ class BunKill {
     clearInterval(progressInterval);
 
     const endTime = performance.now();
+    const elapsedMs = endTime - startTime;
+    this.lastSearchTime = elapsedMs;
+    const formattedTime = this.formatElapsedTime(elapsedMs);
     console.log(
-      `\n${colors.green}\x1b[1m✅\x1b[0m Scan completed in ${
-        (endTime - startTime).toFixed(2)
-      }ms${colors.reset}`,
+      `\n${colors.green}\x1b[1m✅\x1b[0m Scan completed in ${formattedTime}${colors.reset}`,
     );
     console.log(
       `${colors.blue}\x1b[1m📊\x1b[0m Found ${foundNodeModules} node_modules directories${colors.reset}`,
@@ -353,8 +355,11 @@ class BunKill {
     const render = () => {
       console.clear();
       console.log(LOGO);
+      const searchTime = this.lastSearchTime > 0
+        ? this.formatElapsedTime(this.lastSearchTime)
+        : "N/A";
       console.log(
-        `${colors.bold}${colors.blue}Found ${this.nodeModules.length} node_modules directories${colors.reset}`,
+        `${colors.bold}${colors.blue}Found ${this.nodeModules.length} node_modules directories${colors.reset} ${colors.gray}(search took ${searchTime})${colors.reset}`,
       );
       console.log(
         `${colors.cyan}BunKill v${CURRENT_VERSION}${colors.reset} | ${colors.gray}Use ↑/↓ to navigate, SPACE to select, ENTER to delete, q to quit${colors.reset}`,
@@ -584,6 +589,7 @@ class BunKill {
         `${colors.blue}\n🗑️  Deleting selected directories...${colors.reset}`,
       );
 
+      const deleteStartTime = performance.now();
       let deletedCount = 0;
       let freedSize = 0;
 
@@ -611,6 +617,10 @@ class BunKill {
       this.nodeModules = this.nodeModules.filter((m) => !toDelete.includes(m));
       this.selectedIndices.clear();
 
+      const deleteEndTime = performance.now();
+      const deleteElapsedMs = deleteEndTime - deleteStartTime;
+      const deleteTime = this.formatElapsedTime(deleteElapsedMs);
+
       console.log(
         `${colors.bold}${colors.green}\n🎉 Cleanup complete!${colors.reset}`,
       );
@@ -619,6 +629,9 @@ class BunKill {
       );
       console.log(
         `${colors.green}   Freed: ${filesize(freedSize)}${colors.reset}`,
+      );
+      console.log(
+        `${colors.green}   Time taken: ${deleteTime}${colors.reset}`,
       );
       console.log(
         `${colors.blue}   Remaining: ${this.nodeModules.length} directories (${this.getTotalSize()})${colors.reset}`,
@@ -670,10 +683,8 @@ class BunKill {
 
   private shouldSkipDirectory(dirPath: string): boolean {
     const skipPatterns = [
-      ".bun",
       "/System",
       "/Library/Application Support",
-      "/Library/Caches",
       "/Library/Frameworks",
       "/Applications",
       "/private",
@@ -683,7 +694,6 @@ class BunKill {
       "/tmp",
       "/var/tmp",
       "/var/log",
-      "/var/cache",
       "/usr/bin",
       "/usr/sbin",
       "/usr/lib",
@@ -701,17 +711,33 @@ class BunKill {
       "Photo Booth Library",
       ".app",
       ".framework",
+    ];
+
+    const allowCachePatterns = [
+      ".bun",
+      ".npm",
       ".vscode",
-      ".idea",
-      ".atom",
-      ".emacs.d",
-      ".yarn",
+      ".vscode-insiders",
       ".cache",
       ".config",
-      ".Trash",
-      ".Trash-",
-      ".DS_Store",
+      ".yarn",
     ];
+
+    const skipCacheSubdirs = [
+      "/Library/Caches/com.apple",
+      "/Library/Caches/CloudKit",
+      "/Library/Caches/Google",
+      "/Library/Caches/Microsoft",
+    ];
+
+    const isAllowedCache = allowCachePatterns.some((pattern) =>
+      dirPath.includes(pattern) &&
+      !skipCacheSubdirs.some((skip) => dirPath.includes(skip))
+    );
+
+    if (isAllowedCache) {
+      return false;
+    }
 
     if (dirPath.includes(".npm/_npx")) {
       return false;
@@ -733,6 +759,18 @@ class BunKill {
 
   getNodeModules(): NodeModule[] {
     return this.nodeModules;
+  }
+
+  formatElapsedTime(ms: number): string {
+    if (ms < 1000) {
+      return `${ms.toFixed(0)}ms`;
+    } else if (ms < 60000) {
+      return `${(ms / 1000).toFixed(2)}s`;
+    } else {
+      const minutes = Math.floor(ms / 60000);
+      const seconds = ((ms % 60000) / 1000).toFixed(1);
+      return `${minutes}m ${seconds}s`;
+    }
   }
 
   private async checkDailyUpdate() {
@@ -855,13 +893,22 @@ program
         console.log(
           `${colors.red}\x1b[1mDeleting all ${modules.length} node_modules...${colors.reset}`,
         );
+
+        const deleteStartTime = performance.now();
         await Promise.allSettled(
           modules.map((module) =>
             rm(module.path, { recursive: true, force: true })
           ),
         );
+        const deleteEndTime = performance.now();
+        const deleteElapsedMs = deleteEndTime - deleteStartTime;
+        const deleteTime = bunkill.formatElapsedTime(deleteElapsedMs);
+
         console.log(
           `${colors.green}\x1b[1m✅ Deleted ${modules.length} node_modules${colors.reset}`,
+        );
+        console.log(
+          `${colors.green}   Time taken: ${deleteTime}${colors.reset}`,
         );
       } else if (options.dryRun) {
         console.log(
