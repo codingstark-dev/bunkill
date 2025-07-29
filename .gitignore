@@ -1,6 +1,7 @@
 # dependencies (bun install)
 node_modules
 .cursor
+bun.lock
 # output
 out
 dist
@@ -9,7 +10,10 @@ test
 # code coverage
 coverage
 *.lcov
-
+benchmark
+benchmark.md
+benchmark-results.json
+benchmark-results-comprehensive.json
 # logs
 logs
 _.log

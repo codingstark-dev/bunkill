@@ -81,6 +81,10 @@ bunkill
 # Scan specific directory
 bunkill --dir /path/to/projects
 
+# Using without global installation
+bunx bunkill                    # Via Bun
+npx bunkill                     # Via npm
+
 # Quick scan with immediate results
 bunkill --depth 1
 ```
