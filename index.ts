@@ -682,7 +682,7 @@ class BunKill {
   }
 
   private shouldSkipDirectory(dirPath: string): boolean {
-    const skipPatterns = [
+    const absoluteSkipRoots = [
       "/System",
       "/Library/Application Support",
       "/Library/Frameworks",
@@ -705,6 +705,9 @@ class BunKill {
       "/opt/homebrew",
       "/usr/local/bin",
       "/usr/local/sbin",
+    ];
+
+    const nameSkipPatterns = [
       ".photolibrary",
       ".photoslibrary",
       ".photoboothlibrary",
@@ -743,9 +746,19 @@ class BunKill {
       return false;
     }
 
-    return skipPatterns.some((pattern) =>
-      dirPath.includes(pattern) ||
-      dirPath.toLowerCase().includes(pattern.toLowerCase())
+    const normalizedPath = dirPath.toLowerCase();
+    const isAbsoluteSkip = absoluteSkipRoots.some((root) => {
+      const normalizedRoot = root.toLowerCase();
+      return normalizedPath === normalizedRoot ||
+        normalizedPath.startsWith(`${normalizedRoot}/`);
+    });
+
+    if (isAbsoluteSkip) {
+      return true;
+    }
+
+    return nameSkipPatterns.some((pattern) =>
+      normalizedPath.includes(pattern.toLowerCase())
     );
   }
 
