@@ -1,12 +1,12 @@
 {
   "name": "bunkill",
-  "module": "index.ts",
-  "main": "index.ts",
+  "module": "dist/cli.js",
+  "main": "dist/cli.js",
   "type": "module",
   "version": "1.0.2",
-  "description": "Bun.js-powered node_modules cleanup tool - faster than npkill",
+  "description": "BunKill 🚀 - npkill alternative. Ultra-fast node_modules cleanup tool powered by Bun.js with interactive search, sorting, and accurate size reporting.",
   "bin": {
-    "bunkill": "./index.ts"
+    "bunkill": "./dist/cli.js"
   },
   "engines": {
     "bun": ">=1.2.19"
@@ -21,24 +21,39 @@
     "url": "https://github.com/codingstark-dev/bunkill/issues"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "^1.3.10",
+    "@types/node": "^24.5.2"
   },
   "scripts": {
-    "test": "bun run index.ts --help"
+    "test": "bun run src/cli.ts --help",
+    "check": "bunx tsc --noEmit",
+    "build": "bun build ./src/cli.ts --target bun --outfile ./dist/cli.js",
+    "prepublishOnly": "bun run check && bun run build",
+    "bench:installed-vs-local": "bun run benchmark/installed-vs-local-benchmark.ts",
+    "bench:traversal": "bun run benchmark/three-way-benchmark.ts"
   },
   "files": [
-    "index.ts",
+    "dist",
     "README.md",
+    "guide.md",
     "LICENSE"
   ],
   "dependencies": {
-    "@types/inquirer": "^9.0.8",
-    "chalk": "^5.4.1",
-    "commander": "^14.0.0",
-    "filesize": "^10.1.6",
-    "inquirer": "^12.8.2"
+    "commander": "^14.0.3",
+    "filesize": "^11.0.13"
   },
-  "keywords": ["bun", "node_modules", "cleanup", "disk-space", "cli"],
+  "keywords": [
+    "bun",
+    "bunkill",
+    "npkill alternative",
+    "node_modules",
+    "cleanup",
+    "disk-space",
+    "cli",
+    "interactive",
+    "search",
+    "sort"
+  ],
   "author": "Himanshu Mourya",
   "license": "MIT"
 }

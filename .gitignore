@@ -10,10 +10,9 @@ test
 # code coverage
 coverage
 *.lcov
-benchmark
-benchmark.md
 benchmark-results.json
 benchmark-results-comprehensive.json
+benchmark-results-installed-vs-local.json
 # logs
 logs
 _.log
@@ -25,6 +24,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.test.local
 .env.production.local
 .env.local
+
+guide.md
 
 # caches
 .eslintcache
