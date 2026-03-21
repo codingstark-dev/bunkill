@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { APP_CONFIG, SCAN_PATHS } from "./config.ts";
 import type { DeleteResult, NodeModule, ScanOptions, ScanResult } from "./types.ts";
@@ -32,31 +32,48 @@ class Semaphore {
 const PERMISSION_ERROR_CODES = new Set(SCAN_PATHS.permissionErrorCodes);
 
 function shouldSkip(dirPath: string): boolean {
+  const np = normalizeSep(dirPath);
   const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
     (p) =>
-      dirPath.includes(p) &&
-      !SCAN_PATHS.skipCacheSubdirs.some((skip) => dirPath.includes(skip)),
+      np.includes(p) &&
+      !SCAN_PATHS.skipCacheSubdirs.some((skip) => np.includes(skip)),
   );
   if (isAllowedCache) return false;
-  if (dirPath.includes(".npm/_npx")) return false;
+  if (np.includes(".npm/_npx")) return false;
 
   return SCAN_PATHS.systemSkipPatterns.some(
     (p) =>
-      dirPath.includes(p) ||
-      dirPath.toLowerCase().includes(p.toLowerCase()),
+      np.includes(p) ||
+      np.toLowerCase().includes(p.toLowerCase()),
   );
 }
 
+const IS_WINDOWS = process.platform === "win32";
+
+function normalizeSep(p: string): string {
+  return IS_WINDOWS ? p.replaceAll("\\", "/") : p;
+}
+
+/** Strip trailing /<target> segment and normalize separators. */
+export function normalizeProjectPath(nmPath: string, target = "node_modules"): string {
+  return normalizeSep(nmPath).replace(new RegExp(`/${target}$`), "");
+}
+
 function isWithinRoot(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
+  const np = normalizeSep(path);
+  const nr = normalizeSep(root);
+  return np === nr || np.startsWith(`${nr}/`);
 }
 
 function hasHiddenPathSegment(dirPath: string, root: string): boolean {
-  const relativePath = dirPath.startsWith(`${root}/`)
-    ? dirPath.slice(root.length + 1)
-    : dirPath === root
+  const np = normalizeSep(dirPath);
+  const nr = normalizeSep(root);
+
+  const relativePath = np.startsWith(`${nr}/`)
+    ? np.slice(nr.length + 1)
+    : np === nr
       ? ""
-      : dirPath;
+      : np;
 
   if (!relativePath) {
     return false;
@@ -84,27 +101,29 @@ function createShouldSkipMatcher(options: ScanOptions): (dirPath: string) => boo
       return true;
     }
 
-    const lowerRoot = matchingRoot.toLowerCase();
-    const lowerPath = dirPath.toLowerCase();
+    const np = normalizeSep(dirPath);
+    const nr = normalizeSep(matchingRoot);
+    const lowerNp = np.toLowerCase();
+    const lowerNr = nr.toLowerCase();
 
     const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
       (pattern) =>
-        dirPath.includes(pattern) &&
-        !SCAN_PATHS.skipCacheSubdirs.some((skip) => dirPath.includes(skip)),
+        np.includes(pattern) &&
+        !SCAN_PATHS.skipCacheSubdirs.some((skip) => np.includes(skip)),
     );
-    if (isAllowedCache || dirPath.includes(".npm/_npx")) {
+    if (isAllowedCache || np.includes(".npm/_npx")) {
       return false;
     }
 
     return SCAN_PATHS.systemSkipPatterns.some((pattern) => {
       const matchesPattern =
-        dirPath.includes(pattern) || lowerPath.includes(pattern.toLowerCase());
+        np.includes(pattern) || lowerNp.includes(pattern.toLowerCase());
       if (!matchesPattern) {
         return false;
       }
 
       const rootIncludesPattern =
-        matchingRoot.includes(pattern) || lowerRoot.includes(pattern.toLowerCase());
+        nr.includes(pattern) || lowerNr.includes(pattern.toLowerCase());
       return !rootIncludesPattern;
     });
   };
@@ -153,25 +172,27 @@ async function readPackageMetadata(projectPath: string): Promise<{
 }
 
 async function getDirectorySize(dirPath: string): Promise<number> {
-  try {
-    const proc = Bun.spawn({
-      cmd: ["du", "-sk", dirPath],
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    const output = await (new Response(proc.stdout) as globalThis.Response).text();
-    if (await proc.exited === 0) {
-      const match = output.match(/^(\d+)/);
-      if (match?.[1]) return parseInt(match[1], 10) * 1024;
+  if (!IS_WINDOWS) {
+    try {
+      const proc = Bun.spawn({
+        cmd: ["du", "-sk", dirPath],
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      const output = await (new Response(proc.stdout) as globalThis.Response).text();
+      if (await proc.exited === 0) {
+        const match = output.match(/^(\d+)/);
+        if (match?.[1]) return parseInt(match[1], 10) * 1024;
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
   }
 
   let total = 0;
   try {
     const glob = new Bun.Glob("**/*");
-    for await (const file of glob.scan({ cwd: dirPath, onlyFiles: true })) {
+    for await (const file of glob.scan({ cwd: dirPath, onlyFiles: true, dot: true })) {
       try {
         const s = await Bun.file(join(dirPath, file)).stat();
         total += s.size;
@@ -242,7 +263,10 @@ async function discoverNodeModulesWithFs(
         }
 
         if (entry.name === options.target) {
-          if (fullPath.split("/node_modules").length > 2) {
+          // Detect nesting: check if the normalized path contains /target/ as a segment
+          const normalizedFull = normalizeSep(fullPath);
+          const segmentMarker = "/" + options.target + "/";
+          if (normalizedFull.includes(segmentMarker)) {
             continue;
           }
           hits.push(fullPath);
@@ -325,7 +349,7 @@ export async function scan(options: ScanOptions): Promise<ScanResult> {
       let mod: NodeModule | null = null;
 
       await metaSemaphore.acquire();
-      const projectPath = nmPath.replace(/\/node_modules$/, "");
+      const projectPath = normalizeProjectPath(nmPath, options.target);
       try {
         mod = await processModuleMeta(nmPath, projectPath);
       } finally {
@@ -423,16 +447,7 @@ export async function deleteModules(
 
   for (const mod of modules) {
     try {
-      const proc = Bun.spawn({
-        cmd: ["rm", "-rf", mod.path],
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      const ok = await proc.exited === 0;
-      if (!ok) {
-        failedPaths.push(mod.path);
-        continue;
-      }
+      await rm(mod.path, { recursive: true, force: true });
       deleted++;
       freed += mod.size;
       deletedPaths.push(mod.path);
