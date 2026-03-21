@@ -29,13 +29,20 @@ BunKill scans large directory trees, calculates folder sizes, and lets you delet
 
 ## Requirements
 
-- Bun is required at runtime
-- macOS is the only platform tested so far
+- [Bun](https://bun.sh) runtime is required
+- Supported platforms: **macOS**, **Linux**, **Windows 10/11**
+- Windows: requires [Windows Terminal](https://aka.ms/terminal) for best interactive UI experience
 
-Install Bun if needed:
+**Install Bun:**
 
+macOS / Linux:
 ```bash
 curl -fsSL https://bun.sh/install | bash
+```
+
+Windows (PowerShell):
+```powershell
+powershell -c "irm bun.sh/install.ps1 | iex"
 ```
 
 ## Install
@@ -56,8 +63,11 @@ bun install -g bunkill
 # interactive scan in current directory
 bunkill
 
-# scan a specific directory
+# scan a specific directory (macOS / Linux)
 bunkill --dir ~/Projects
+
+# scan a specific directory (Windows)
+bunkill --dir "C:\Users\YourName\Projects"
 
 # preview only
 bunkill --dir ~/Projects --dry-run
@@ -101,13 +111,14 @@ Search filters the already loaded list, so you can quickly narrow large result s
 
 ## Platform status
 
-- macOS: tested
-- Linux: not tested yet
-- Windows: not tested yet
+| Platform | Status |
+|---|---|
+| macOS | ✅ Tested |
+| Linux | ⚠️ Not tested yet |
+| Windows 10/11 | ✅ Tested (Windows Terminal recommended) |
 
-Linux and Windows may work, but they have not been validated in this repo yet.
-
-Contributions for Linux and Windows testing or fixes are welcome.
+> **Windows note:** Interactive mode requires a terminal that supports ANSI escape codes and raw mode.
+> [Windows Terminal](https://aka.ms/terminal) works well. The legacy `cmd.exe` prompt is not supported.
 
 ## Performance
 

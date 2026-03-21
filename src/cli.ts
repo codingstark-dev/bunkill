@@ -5,7 +5,7 @@ import { stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { filesize } from "filesize";
 import { APP_CONFIG } from "./config.ts";
-import { deleteModules, scan as scanEngine } from "./scanner.ts";
+import { deleteModules, normalizeProjectPath, scan as scanEngine } from "./scanner.ts";
 import type { NodeModule, ScanOptions } from "./types.ts";
 
 const LOGO = `
@@ -558,7 +558,7 @@ class BunKill {
     }
 
     this.pendingUiMeta.add(module.path);
-    const projectPath = module.path.replace(/\/node_modules$/, "");
+    const projectPath = normalizeProjectPath(module.path);
 
     try {
       const result = await Bun.$`git -C ${projectPath} status --short --branch`.quiet().nothrow();
