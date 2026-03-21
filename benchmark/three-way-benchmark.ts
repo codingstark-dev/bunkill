@@ -43,10 +43,11 @@ function toWslPath(winPath: string): string {
 }
 
 async function npkillScan(dir: string, useWsl = false): Promise<number> {
-  // Try to load Node environment in WSL by using a login shell. 
-  // Add > /dev/null to discard TTY escape sequences that corrupt the Windows terminal.
+  // Use login shell so node/npkill are in PATH inside WSL.
+  // Only silence stderr (2>/dev/null) so stdout flows to proc.stdout for parsing.
+  // Terminal corruption from npkill's \r sequences is handled by printRow's \r\x1b[2K.
   const scriptCmd = useWsl
-    ? ["wsl", "bash", "-lc", `script -q /dev/null -c 'npkill -d "${toWslPath(dir)}" -nu --hide-errors' > /dev/null`]
+    ? ["wsl", "bash", "-lc", `script -q /dev/null -c 'npkill -d "${toWslPath(dir)}" -nu --hide-errors' 2>/dev/null`]
     : ["script", "-q", "/dev/null", "npkill", "-d", dir, "-nu", "--hide-errors"];
 
   try {
