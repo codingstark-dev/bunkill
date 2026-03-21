@@ -34,10 +34,24 @@ function shouldSkip(p: string): boolean {
   );
 }
 
-async function npkillScan(dir: string): Promise<number> {
+/** Convert a Windows absolute path to a WSL /mnt/... path. */
+function toWslPath(winPath: string): string {
+  // e.g. C:\Users\foo → /mnt/c/Users/foo
+  return winPath
+    .replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`)
+    .replaceAll("\\", "/");
+}
+
+async function npkillScan(dir: string, useWsl = false): Promise<number> {
+  // Try to load Node environment in WSL by using a login shell. 
+  // Add > /dev/null to discard TTY escape sequences that corrupt the Windows terminal.
+  const scriptCmd = useWsl
+    ? ["wsl", "bash", "-lc", `script -q /dev/null -c 'npkill -d "${toWslPath(dir)}" -nu --hide-errors' > /dev/null`]
+    : ["script", "-q", "/dev/null", "npkill", "-d", dir, "-nu", "--hide-errors"];
+
   try {
     const proc = Bun.spawn({
-      cmd: ["script", "-q", "/dev/null", "npkill", "-d", dir, "-nu", "--hide-errors"],
+      cmd: scriptCmd,
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
@@ -84,11 +98,23 @@ async function bunGlobScan(dir: string): Promise<number> {
     onlyFiles: false,
     followSymlinks: false,
   })) {
+    // Normalize to forward slashes for consistent checks
+    const normalized = relative.replaceAll("\\", "/");
     const fullPath = join(dir, relative);
-    if (fullPath.split("/node_modules").length > 2) continue;
-    if (shouldSkip(fullPath)) continue;
-    const depth = relative.split("/").filter(Boolean).length;
+    const fullNormalized = fullPath.replaceAll("\\", "/");
+
+    // Skip nested node_modules (same as bunkill)
+    if (fullNormalized.includes("/node_modules/")) continue;
+    if (shouldSkip(fullNormalized)) continue;
+
+    const depth = normalized.split("/").filter(Boolean).length;
     if (depth > MAX_DEPTH) continue;
+
+    // Require a package.json in the parent directory (same as bunkill)
+    const parentPath = fullPath.slice(0, fullPath.length - "/node_modules".length);
+    const pkgJson = Bun.file(join(parentPath, "package.json"));
+    if (!(await pkgJson.exists())) continue;
+
     results.push(fullPath);
   }
 
@@ -162,8 +188,9 @@ function fmtMs(ms: number): string {
 }
 
 function printRow(r: BenchResult, baseline: number): void {
+  // \r\x1b[2K clears any partial line left by WSL/npkill carriage returns
   if (!r.available) {
-    console.log(`  ${r.label.padEnd(24)}  N/A (${r.note ?? "unavailable"})`);
+    process.stdout.write(`\r\x1b[2K  ${r.label.padEnd(24)}  N/A (${r.note ?? "unavailable"})\n`);
     return;
   }
 
@@ -171,10 +198,10 @@ function printRow(r: BenchResult, baseline: number): void {
     ? "baseline"
     : `${(baseline / r.avgMs).toFixed(1)}x faster`;
 
-  console.log(
-    `  ${r.label.padEnd(24)}  avg=${fmtMs(r.avgMs).padStart(8)}  ` +
+  process.stdout.write(
+    `\r\x1b[2K  ${r.label.padEnd(24)}  avg=${fmtMs(r.avgMs).padStart(8)}  ` +
     `min=${fmtMs(r.minMs).padStart(8)}  max=${fmtMs(r.maxMs).padStart(8)}  ` +
-    `found=${String(r.found).padStart(4)}  ${speedup}`,
+    `found=${String(r.found).padStart(4)}  ${speedup}\n`,
   );
 }
 
@@ -184,9 +211,27 @@ console.log("╚═════════════════════�
 console.log(`  Scan root : ${SCAN_DIR}`);
 console.log(`  Runs      : ${RUNS} (+ 1 warm-up)\n`);
 
-const npkillPath = await Bun.$.nothrow()`which npkill`.text().then((s) => s.trim()).catch(() => "");
+const isWindows = process.platform === "win32";
 
-console.log(`  npkill    : ${npkillPath || "NOT FOUND  (npm install -g npkill)"}`);
+// Detect npkill
+const npkillPath = isWindows
+  ? await Bun.$.nothrow()`where npkill`.text().then((s) => s.trim().split("\n")[0]?.trim() ?? "").catch(() => "")
+  : await Bun.$.nothrow()`which npkill`.text().then((s) => s.trim()).catch(() => "");
+
+// Detect WSL (Windows only)
+const wslAvailable = isWindows
+  ? await Bun.$.nothrow()`where wsl`.text().then((s) => s.trim().length > 0).catch(() => false)
+  : false;
+
+const npkillStatus = !npkillPath
+  ? "NOT FOUND  (npm install -g npkill)"
+  : isWindows && wslAvailable
+    ? `${npkillPath} (via WSL)`
+    : isWindows
+      ? `${npkillPath} (skipped: WSL not found — install WSL to enable)`
+      : npkillPath;
+
+console.log(`  npkill    : ${npkillStatus}`);
 console.log(`  Bun.Glob  : baseline glob walk`);
 console.log(`  bunkill   : current scanner.ts implementation\n`);
 
@@ -197,9 +242,15 @@ const [globResult, bunkillResult] = await Promise.all([
   bench("bunkill current", bunKillScan, SCAN_DIR, RUNS),
 ]);
 
-const npkillResult = npkillPath
-  ? await bench("npkill", npkillScan, SCAN_DIR, 1)
-  : { label: "npkill", avgMs: 0, minMs: 0, maxMs: 0, found: -1, available: false, note: "not installed" };
+// On Windows: run npkill via WSL if available; on Unix: run directly
+const canRunNpkill = npkillPath && (!isWindows || wslAvailable);
+const npkillResult = canRunNpkill
+  ? await bench("npkill", (d) => npkillScan(d, isWindows && wslAvailable), SCAN_DIR, 1)
+  : {
+      label: "npkill",
+      avgMs: 0, minMs: 0, maxMs: 0, found: -1, available: false,
+      note: !npkillPath ? "not installed" : "WSL not found (install WSL to enable)",
+    };
 
 const available = [npkillResult, globResult, bunkillResult].filter((r) => r.available);
 
