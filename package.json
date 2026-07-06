@@ -6,7 +6,7 @@
   "version": "1.0.4",
   "description": "BunKill 🚀 - npkill alternative. Ultra-fast node_modules cleanup tool powered by Bun.js with interactive search, sorting, and accurate size reporting.",
   "bin": {
-    "bunkill": "./dist/cli.js"
+    "bunkill": "dist/cli.js"
   },
   "engines": {
     "bun": ">=1.2.19"
