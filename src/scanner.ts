@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { APP_CONFIG, SCAN_PATHS } from "./config.ts";
 import type { DeleteResult, NodeModule, ScanOptions, ScanResult } from "./types.ts";
@@ -31,32 +31,68 @@ class Semaphore {
 
 const PERMISSION_ERROR_CODES = new Set(SCAN_PATHS.permissionErrorCodes);
 
+const IS_WINDOWS = process.platform === "win32";
+
+function normalizeSep(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function trimTrailingSep(path: string): string {
+  if (path === "/" || /^[A-Za-z]:\/$/.test(path)) {
+    return path;
+  }
+
+  return path.replace(/\/+$/, "");
+}
+
+export function normalizeProjectPath(
+  nodeModulesPath: string,
+  target = "node_modules",
+): string {
+  const normalizedPath = trimTrailingSep(normalizeSep(nodeModulesPath));
+  const normalizedTarget = trimTrailingSep(normalizeSep(target));
+  const suffix = `/${normalizedTarget}`;
+
+  return normalizedPath.endsWith(suffix)
+    ? normalizedPath.slice(0, -suffix.length)
+    : normalizedPath;
+}
+
 function shouldSkip(dirPath: string): boolean {
+  const normalizedPath = normalizeSep(dirPath);
+  const lowerPath = normalizedPath.toLowerCase();
   const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
     (p) =>
-      dirPath.includes(p) &&
-      !SCAN_PATHS.skipCacheSubdirs.some((skip) => dirPath.includes(skip)),
+      normalizedPath.includes(p) &&
+      !SCAN_PATHS.skipCacheSubdirs.some((skip) => normalizedPath.includes(skip)),
   );
   if (isAllowedCache) return false;
-  if (dirPath.includes(".npm/_npx")) return false;
+  if (normalizedPath.includes(".npm/_npx")) return false;
 
   return SCAN_PATHS.systemSkipPatterns.some(
     (p) =>
-      dirPath.includes(p) ||
-      dirPath.toLowerCase().includes(p.toLowerCase()),
+      normalizedPath.includes(p) ||
+      lowerPath.includes(p.toLowerCase()),
   );
 }
 
 function isWithinRoot(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
+  const normalizedPath = trimTrailingSep(normalizeSep(path));
+  const normalizedRoot = trimTrailingSep(normalizeSep(root));
+
+  return normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`);
 }
 
 function hasHiddenPathSegment(dirPath: string, root: string): boolean {
-  const relativePath = dirPath.startsWith(`${root}/`)
-    ? dirPath.slice(root.length + 1)
-    : dirPath === root
+  const normalizedPath = normalizeSep(dirPath);
+  const normalizedRoot = trimTrailingSep(normalizeSep(root));
+
+  const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : normalizedPath === normalizedRoot
       ? ""
-      : dirPath;
+      : normalizedPath;
 
   if (!relativePath) {
     return false;
@@ -84,27 +120,31 @@ function createShouldSkipMatcher(options: ScanOptions): (dirPath: string) => boo
       return true;
     }
 
-    const lowerRoot = matchingRoot.toLowerCase();
-    const lowerPath = dirPath.toLowerCase();
+    const normalizedPath = normalizeSep(dirPath);
+    const normalizedRoot = normalizeSep(matchingRoot);
+    const lowerPath = normalizedPath.toLowerCase();
+    const lowerRoot = normalizedRoot.toLowerCase();
 
     const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
       (pattern) =>
-        dirPath.includes(pattern) &&
-        !SCAN_PATHS.skipCacheSubdirs.some((skip) => dirPath.includes(skip)),
+        normalizedPath.includes(pattern) &&
+        !SCAN_PATHS.skipCacheSubdirs.some((skip) => normalizedPath.includes(skip)),
     );
-    if (isAllowedCache || dirPath.includes(".npm/_npx")) {
+    if (isAllowedCache || normalizedPath.includes(".npm/_npx")) {
       return false;
     }
 
     return SCAN_PATHS.systemSkipPatterns.some((pattern) => {
       const matchesPattern =
-        dirPath.includes(pattern) || lowerPath.includes(pattern.toLowerCase());
+        normalizedPath.includes(pattern) ||
+        lowerPath.includes(pattern.toLowerCase());
       if (!matchesPattern) {
         return false;
       }
 
       const rootIncludesPattern =
-        matchingRoot.includes(pattern) || lowerRoot.includes(pattern.toLowerCase());
+        normalizedRoot.includes(pattern) ||
+        lowerRoot.includes(pattern.toLowerCase());
       return !rootIncludesPattern;
     });
   };
@@ -153,25 +193,28 @@ async function readPackageMetadata(projectPath: string): Promise<{
 }
 
 async function getDirectorySize(dirPath: string): Promise<number> {
-  try {
-    const proc = Bun.spawn({
-      cmd: ["du", "-sk", dirPath],
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    const output = await (new Response(proc.stdout) as globalThis.Response).text();
-    if (await proc.exited === 0) {
-      const match = output.match(/^(\d+)/);
-      if (match?.[1]) return parseInt(match[1], 10) * 1024;
+  if (!IS_WINDOWS) {
+    try {
+      const proc = Bun.spawn({
+        cmd: ["du", "-sk", dirPath],
+        stdout: "pipe",
+        stderr: "ignore",
+        env: { ...process.env, LANG: "C", LC_ALL: "C" },
+      });
+      const output = await (new Response(proc.stdout) as globalThis.Response).text();
+      if (await proc.exited === 0) {
+        const match = output.match(/^(\d+)/);
+        if (match?.[1]) return parseInt(match[1], 10) * 1024;
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
   }
 
   let total = 0;
   try {
     const glob = new Bun.Glob("**/*");
-    for await (const file of glob.scan({ cwd: dirPath, onlyFiles: true })) {
+    for await (const file of glob.scan({ cwd: dirPath, onlyFiles: true, dot: true })) {
       try {
         const s = await Bun.file(join(dirPath, file)).stat();
         total += s.size;
@@ -234,7 +277,8 @@ async function discoverNodeModulesWithFs(
         if (shouldSkipPath(fullPath)) {
           continue;
         }
-        if (options.exclude.some((ex) => fullPath.includes(ex))) {
+        const normalizedFullPath = normalizeSep(fullPath);
+        if (options.exclude.some((ex) => normalizedFullPath.includes(normalizeSep(ex)))) {
           continue;
         }
         if (options.excludeHidden && entry.name.startsWith(".")) {
@@ -242,7 +286,8 @@ async function discoverNodeModulesWithFs(
         }
 
         if (entry.name === options.target) {
-          if (fullPath.split("/node_modules").length > 2) {
+          const segmentMarker = `/${normalizeSep(options.target)}/`;
+          if (normalizedFullPath.includes(segmentMarker)) {
             continue;
           }
           hits.push(fullPath);
@@ -325,7 +370,7 @@ export async function scan(options: ScanOptions): Promise<ScanResult> {
       let mod: NodeModule | null = null;
 
       await metaSemaphore.acquire();
-      const projectPath = nmPath.replace(/\/node_modules$/, "");
+      const projectPath = normalizeProjectPath(nmPath, options.target);
       try {
         mod = await processModuleMeta(nmPath, projectPath);
       } finally {
@@ -420,26 +465,21 @@ export async function deleteModules(
   let freed = 0;
   const failedPaths: string[] = [];
   const deletedPaths: string[] = [];
+  const deleteSemaphore = new Semaphore(APP_CONFIG.defaultDeleteConcurrency);
 
-  for (const mod of modules) {
+  await Promise.all(modules.map(async (mod) => {
+    await deleteSemaphore.acquire();
     try {
-      const proc = Bun.spawn({
-        cmd: ["rm", "-rf", mod.path],
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      const ok = await proc.exited === 0;
-      if (!ok) {
-        failedPaths.push(mod.path);
-        continue;
-      }
+      await rm(mod.path, { recursive: true, force: true });
       deleted++;
       freed += mod.size;
       deletedPaths.push(mod.path);
     } catch {
       failedPaths.push(mod.path);
+    } finally {
+      deleteSemaphore.release();
     }
-  }
+  }));
 
   return {
     deleted,
