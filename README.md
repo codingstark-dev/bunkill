@@ -114,11 +114,13 @@ Search filters the already loaded list, so you can quickly narrow large result s
 | Platform | Status |
 |---|---|
 | macOS | ✅ Tested |
-| Linux | ⚠️ Not tested yet |
-| Windows 10/11 | ✅ Tested (Windows Terminal recommended) |
+| Linux | ✅ CI smoke tested |
+| Windows 10/11 | ✅ CI smoke tested (Windows Terminal recommended) |
 
 > **Windows note:** Interactive mode requires a terminal that supports ANSI escape codes and raw mode.
 > [Windows Terminal](https://aka.ms/terminal) works well. The legacy `cmd.exe` prompt is not supported.
+
+CI covers help output, type checking, builds, and dry-run scanning. Manual interactive terminal testing is still useful across terminals.
 
 ## Performance
 

@@ -12,6 +12,7 @@ export const APP_CONFIG = {
       : 8;
     return Math.max(4, Math.min(16, cpuCount || 8));
   })(),
+  defaultDeleteConcurrency: 8,
 } as const;
 
 export const SCAN_PATHS = {

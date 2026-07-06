@@ -34,11 +34,5 @@ jobs:
       - name: Smoke test - help
         run: bun run src/cli.ts --help
 
-      - name: Smoke test - dry-run (Unix)
-        if: runner.os != 'Windows'
-        run: bun run src/cli.ts --dir ${{ github.workspace }} --dry-run --hide-errors
-
-      - name: Smoke test - dry-run (Windows)
-        if: runner.os == 'Windows'
-        run: bun run src/cli.ts --dir ${{ github.workspace }} --dry-run --hide-errors
-        shell: pwsh
+      - name: Smoke test - dry-run
+        run: bun run src/cli.ts --dir "${{ github.workspace }}" --dry-run --hide-errors

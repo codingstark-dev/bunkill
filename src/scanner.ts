@@ -31,50 +31,68 @@ class Semaphore {
 
 const PERMISSION_ERROR_CODES = new Set(SCAN_PATHS.permissionErrorCodes);
 
+const IS_WINDOWS = process.platform === "win32";
+
+function normalizeSep(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function trimTrailingSep(path: string): string {
+  if (path === "/" || /^[A-Za-z]:\/$/.test(path)) {
+    return path;
+  }
+
+  return path.replace(/\/+$/, "");
+}
+
+export function normalizeProjectPath(
+  nodeModulesPath: string,
+  target = "node_modules",
+): string {
+  const normalizedPath = trimTrailingSep(normalizeSep(nodeModulesPath));
+  const normalizedTarget = trimTrailingSep(normalizeSep(target));
+  const suffix = `/${normalizedTarget}`;
+
+  return normalizedPath.endsWith(suffix)
+    ? normalizedPath.slice(0, -suffix.length)
+    : normalizedPath;
+}
+
 function shouldSkip(dirPath: string): boolean {
-  const np = normalizeSep(dirPath);
+  const normalizedPath = normalizeSep(dirPath);
+  const lowerPath = normalizedPath.toLowerCase();
   const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
     (p) =>
-      np.includes(p) &&
-      !SCAN_PATHS.skipCacheSubdirs.some((skip) => np.includes(skip)),
+      normalizedPath.includes(p) &&
+      !SCAN_PATHS.skipCacheSubdirs.some((skip) => normalizedPath.includes(skip)),
   );
   if (isAllowedCache) return false;
-  if (np.includes(".npm/_npx")) return false;
+  if (normalizedPath.includes(".npm/_npx")) return false;
 
   return SCAN_PATHS.systemSkipPatterns.some(
     (p) =>
-      np.includes(p) ||
-      np.toLowerCase().includes(p.toLowerCase()),
+      normalizedPath.includes(p) ||
+      lowerPath.includes(p.toLowerCase()),
   );
 }
 
-const IS_WINDOWS = process.platform === "win32";
-
-function normalizeSep(p: string): string {
-  return IS_WINDOWS ? p.replaceAll("\\", "/") : p;
-}
-
-export function normalizeProjectPath(nmPath: string, target = "node_modules"): string {
-  const normalized = normalizeSep(nmPath);
-  const suffix = "/" + target.replace(/\/+$/, "");
-  return normalized.endsWith(suffix) ? normalized.slice(0, -suffix.length) : normalized;
-}
-
 function isWithinRoot(path: string, root: string): boolean {
-  const np = normalizeSep(path);
-  const nr = normalizeSep(root);
-  return np === nr || np.startsWith(`${nr}/`);
+  const normalizedPath = trimTrailingSep(normalizeSep(path));
+  const normalizedRoot = trimTrailingSep(normalizeSep(root));
+
+  return normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`);
 }
 
 function hasHiddenPathSegment(dirPath: string, root: string): boolean {
-  const np = normalizeSep(dirPath);
-  const nr = normalizeSep(root);
+  const normalizedPath = normalizeSep(dirPath);
+  const normalizedRoot = trimTrailingSep(normalizeSep(root));
 
-  const relativePath = np.startsWith(`${nr}/`)
-    ? np.slice(nr.length + 1)
-    : np === nr
+  const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : normalizedPath === normalizedRoot
       ? ""
-      : np;
+      : normalizedPath;
 
   if (!relativePath) {
     return false;
@@ -102,29 +120,31 @@ function createShouldSkipMatcher(options: ScanOptions): (dirPath: string) => boo
       return true;
     }
 
-    const np = normalizeSep(dirPath);
-    const nr = normalizeSep(matchingRoot);
-    const lowerNp = np.toLowerCase();
-    const lowerNr = nr.toLowerCase();
+    const normalizedPath = normalizeSep(dirPath);
+    const normalizedRoot = normalizeSep(matchingRoot);
+    const lowerPath = normalizedPath.toLowerCase();
+    const lowerRoot = normalizedRoot.toLowerCase();
 
     const isAllowedCache = SCAN_PATHS.allowCachePatterns.some(
       (pattern) =>
-        np.includes(pattern) &&
-        !SCAN_PATHS.skipCacheSubdirs.some((skip) => np.includes(skip)),
+        normalizedPath.includes(pattern) &&
+        !SCAN_PATHS.skipCacheSubdirs.some((skip) => normalizedPath.includes(skip)),
     );
-    if (isAllowedCache || np.includes(".npm/_npx")) {
+    if (isAllowedCache || normalizedPath.includes(".npm/_npx")) {
       return false;
     }
 
     return SCAN_PATHS.systemSkipPatterns.some((pattern) => {
       const matchesPattern =
-        np.includes(pattern) || lowerNp.includes(pattern.toLowerCase());
+        normalizedPath.includes(pattern) ||
+        lowerPath.includes(pattern.toLowerCase());
       if (!matchesPattern) {
         return false;
       }
 
       const rootIncludesPattern =
-        nr.includes(pattern) || lowerNr.includes(pattern.toLowerCase());
+        normalizedRoot.includes(pattern) ||
+        lowerRoot.includes(pattern.toLowerCase());
       return !rootIncludesPattern;
     });
   };
@@ -179,6 +199,7 @@ async function getDirectorySize(dirPath: string): Promise<number> {
         cmd: ["du", "-sk", dirPath],
         stdout: "pipe",
         stderr: "ignore",
+        env: { ...process.env, LANG: "C", LC_ALL: "C" },
       });
       const output = await (new Response(proc.stdout) as globalThis.Response).text();
       if (await proc.exited === 0) {
@@ -256,7 +277,8 @@ async function discoverNodeModulesWithFs(
         if (shouldSkipPath(fullPath)) {
           continue;
         }
-        if (options.exclude.some((ex) => fullPath.includes(ex))) {
+        const normalizedFullPath = normalizeSep(fullPath);
+        if (options.exclude.some((ex) => normalizedFullPath.includes(normalizeSep(ex)))) {
           continue;
         }
         if (options.excludeHidden && entry.name.startsWith(".")) {
@@ -264,10 +286,8 @@ async function discoverNodeModulesWithFs(
         }
 
         if (entry.name === options.target) {
-          // Detect nesting: check if the normalized path contains /target/ as a segment
-          const normalizedFull = normalizeSep(fullPath);
-          const segmentMarker = "/" + options.target + "/";
-          if (normalizedFull.includes(segmentMarker)) {
+          const segmentMarker = `/${normalizeSep(options.target)}/`;
+          if (normalizedFullPath.includes(segmentMarker)) {
             continue;
           }
           hits.push(fullPath);
@@ -445,8 +465,10 @@ export async function deleteModules(
   let freed = 0;
   const failedPaths: string[] = [];
   const deletedPaths: string[] = [];
+  const deleteSemaphore = new Semaphore(APP_CONFIG.defaultDeleteConcurrency);
 
-  for (const mod of modules) {
+  await Promise.all(modules.map(async (mod) => {
+    await deleteSemaphore.acquire();
     try {
       await rm(mod.path, { recursive: true, force: true });
       deleted++;
@@ -454,8 +476,10 @@ export async function deleteModules(
       deletedPaths.push(mod.path);
     } catch {
       failedPaths.push(mod.path);
+    } finally {
+      deleteSemaphore.release();
     }
-  }
+  }));
 
   return {
     deleted,
