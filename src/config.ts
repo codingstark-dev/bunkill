@@ -1,6 +1,6 @@
 export const APP_CONFIG = {
   packageName: "bunkill",
-  currentVersion: "1.0.3",
+  currentVersion: "1.0.4",
   updateCheckFile: ".bunkill-last-update-check",
   updateCheckIntervalMs: 24 * 60 * 60 * 1000,
   updateCheckTimeoutMs: 2500,
